@@ -1,32 +1,60 @@
-# name: CI
+name: Deploy Streamlit App to EC2
 
-# on:
-#   push:
-#     branches: [ main ]
-#   pull_request:
-#     branches: [ main ]
+on:
+  push:
+    branches:
+      - main
 
-# jobs:
-#   build:
-#     runs-on: ubuntu-latest
-#     strategy:
-#       matrix:
-#         java-version: [21]
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-#       - name: Set up JDK
-#         uses: actions/setup-java@v4
-#         with:
-#           distribution: temurin
-#           java-version: ${{ matrix.java-version }}
-#           cache: maven
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+            APP_DIR=/home/ec2-user/front
+            REPO_NAME=Java-springboot-project
+            REPO_URL=https://github.com/CloudTechDevOps/Java-springboot-project.git
+            mkdir -p $APP_DIR
+            cd $APP_DIR
+            if [ -d "$REPO_NAME/.git" ]; then
+              cd $REPO_NAME
+              git reset --hard
+              git pull origin main
+            else
+              git clone $REPO_URL
+              cd $REPO_NAME
+            fi
 
-#       - name: Build (backend)
-#         working-directory: backend
-#         run: mvn -B -DskipTests package
+            # Create virtual environment
+            sudo yum install python3-pip -y
+            cd frontend
+            python3 -m venv venv
+            source venv/bin/activate
 
-#       - name: Run tests (backend)
-#         working-directory: backend
-#         run: mvn -B test
+            # Install dependencies
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            # Kill old process
+            pkill -f streamlit || true
+
+            # Set API URL (PRIVATE IP)
+            export API_URL=http://localhost:8084
+
+            # Run Streamlit
+            nohup streamlit run app.py \
+              --server.port 8501 \
+              --server.address 0.0.0.0 > app.log 2>&1 &
+
+            echo "✅ Deployment completed"
